@@ -85,7 +85,7 @@ st.dataframe(transition_model.round(3))
 st.caption("행: 현재 상태, 열: 다음 상태, 값: 발생 확률")
 
 # -----------------------------
-# 5. 탐지 시뮬레이션
+# 5. 탐지 시뮬레이션 (평균 방식으로 변경)
 # -----------------------------
 np.random.seed(42)
 states = list(transition_model.index)
@@ -95,12 +95,12 @@ avg_probs = []
 for _ in range(seq_count):
     seq = np.random.choice(states, seq_len)
     sim_sequences.append(seq)
-    prob = 1.0
-    for i in range(len(seq)-1):
-        prob *= transition_model.loc[seq[i], seq[i+1]]
-    avg_probs.append(prob)
+    # 기존 곱 방식 대신 평균 전이 확률 계산
+    prob_list = [transition_model.loc[seq[i], seq[i+1]] for i in range(len(seq)-1)]
+    avg_prob = np.mean(prob_list)
+    avg_probs.append(avg_prob)
 
-anomaly_flags = [p<threshold for p in avg_probs]
+anomaly_flags = [p < threshold for p in avg_probs]
 
 # -----------------------------
 # 6. Plotly 그래프: 선+점
