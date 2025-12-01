@@ -39,7 +39,7 @@ def load_kdd(url=GITHUB_RAW_URL):
     # sep=None + engine='python'로 공백/콤마 자동 처리
     df = pd.read_csv(url, names=column_names, sep=None, engine='python', index_col=False)
     # 라벨 문자열 정리 (끝에 점(.) 붙는 경우 제거)
-    df['label'] = df['label'].astype(str).str.strip().str.replace('\.', '', regex=True)
+    df['label'] = df['label'].astype(str).str.strip().str.replace(r'\.', '', regex=True)
     return df
 
 # =======================================
