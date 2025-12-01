@@ -1,41 +1,42 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import plotly.graph_objects as go
 
+# -----------------------------
+# 1. 페이지 설정
+# -----------------------------
 st.set_page_config(page_title="마르코프 체인 IDS", layout="wide")
 st.title("🔒 마르코프 체인 기반 네트워크 침입 탐지 시스템")
 st.write("""
-이 앱은 정상 네트워크 연결 데이터를 기반으로 **연속 이벤트 전이 패턴**을 학습하고,
+이 앱은 정상 네트워크 트래픽 데이터를 기반으로 **연속 이벤트 전이 패턴**을 학습하고,
 새로운 연결 이벤트에서 이상 징후를 탐지합니다.
 """)
 
 # -----------------------------
-# 1. 사이드바 - 사용자 입력
+# 2. 사이드바
 # -----------------------------
-st.sidebar.header("1️⃣ 탐지 설정")
+st.sidebar.header("설정")
 scenario = st.sidebar.selectbox(
     "분석 시나리오 선택",
-    options=["정상 트래픽", "DoS 공격", "Probe 공격", "혼합 시나리오", "랜덤 시나리오"],
-    help="분석할 트래픽 유형을 선택하세요."
+    options=["정상 트래픽", "DoS 공격", "Probe 공격", "혼합 시나리오", "랜덤 시나리오"]
 )
-seq_len = st.sidebar.slider(
-    "연속 이벤트 길이", min_value=2, max_value=20, value=5, step=1,
-    help="한 번에 관찰할 연속 이벤트 수 설정"
-)
-seq_count = st.sidebar.slider(
-    "연속 이벤트 묶음 수", min_value=10, max_value=500, value=50, step=10,
-    help="한 번에 분석할 이벤트 묶음 수 설정"
-)
-threshold = st.sidebar.slider(
-    "이상 탐지 민감도",
-    min_value=0.0001, max_value=0.1, value=0.01, step=0.001,
-    help="이 확률보다 낮으면 이상 이벤트로 탐지"
-)
-st.sidebar.info("슬라이더 조정 시 결과 그래프와 탐지 결과가 실시간 업데이트 됩니다.")
+
+seq_len = st.sidebar.slider("연속 이벤트 길이", min_value=2, max_value=20, value=5, step=1)
+seq_count = st.sidebar.slider("연속 이벤트 묶음 수", min_value=10, max_value=500, value=50, step=10)
+threshold = st.sidebar.slider("이상 탐지 민감도", min_value=0.0001, max_value=0.1, value=0.01, step=0.001)
+
+# Expander: 사이드바 도움말
+with st.sidebar.expander("💡 탐지 도움말"):
+    st.write("""
+    - 빨간 점: 이상 이벤트 탐지  
+    - 파란 점: 정상 이벤트  
+    - 연속 이벤트 길이, 묶음 수, 민감도를 조정해 탐지 시나리오를 바꿀 수 있습니다.
+    - 평균 전이 확률이 임계값보다 낮으면 이상 이벤트로 표시됩니다.
+    """)
 
 # -----------------------------
-# 2. 데이터 로드
+# 3. 데이터 로드
 # -----------------------------
 @st.cache_data
 def load_data(file_path):
@@ -60,7 +61,7 @@ data_train = load_data("KDDTrain+.txt")
 st.success("✅ 데이터 로드 완료")
 
 # -----------------------------
-# 3. 전이행렬 생성 함수
+# 4. 마르코프 전이행렬 생성
 # -----------------------------
 def create_transition_matrix(df_normal):
     states = sorted(df_normal['flag'].unique())
@@ -78,8 +79,12 @@ def create_transition_matrix(df_normal):
 df_normal = data_train[data_train['label']=="normal"]
 transition_model = create_transition_matrix(df_normal)
 
+st.subheader("📊 학습된 정상 트래픽 전이행렬 (일부)")
+st.dataframe(transition_model.round(3))
+st.caption("행: 현재 상태, 열: 다음 상태, 값: 발생 확률")
+
 # -----------------------------
-# 4. 시뮬레이션 탐지 (예시)
+# 5. 탐지 시뮬레이션
 # -----------------------------
 np.random.seed(42)
 states = list(transition_model.index)
@@ -97,36 +102,52 @@ for _ in range(seq_count):
 anomaly_flags = [p<threshold for p in avg_probs]
 
 # -----------------------------
-# 5. Plotly 그래프
+# 6. Plotly 그래프: 선+점
 # -----------------------------
+fig = go.Figure()
+
+# 선 + 점 (전체 평균 전이 확률)
+fig.add_trace(go.Scatter(
+    x=list(range(1, seq_count+1)),
+    y=avg_probs,
+    mode="lines+markers",
+    name="평균 전이 확률"
+))
+
+# 이상 이벤트만 빨간 점
+fig.add_trace(go.Scatter(
+    x=[i+1 for i, flag in enumerate(anomaly_flags) if flag],
+    y=[avg_probs[i] for i, flag in enumerate(anomaly_flags) if flag],
+    mode="markers",
+    marker=dict(color="red", size=10),
+    name="이상 이벤트"
+))
+
+fig.update_layout(title="연속 이벤트 평균 전이 확률", xaxis_title="연속 이벤트 묶음 번호",
+                  yaxis_title="평균 전이 확률")
+st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------
+# 7. 탐지 결과 테이블
+# -----------------------------
+st.subheader("🔍 탐지 결과 요약")
 df_plot = pd.DataFrame({
     "연속 이벤트 묶음 번호": range(1, seq_count+1),
     "평균 전이 확률": avg_probs,
     "이상 탐지 여부":["이상" if flag else "정상" for flag in anomaly_flags]
 })
-fig = px.scatter(
-    df_plot, x="연속 이벤트 묶음 번호", y="평균 전이 확률",
-    color="이상 탐지 여부", color_discrete_map={"정상":"blue","이상":"red"},
-    title="연속 이벤트 평균 전이 확률 (빨간 점 = 이상)"
-)
-st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------
-# 6. 탐지 결과 테이블
-# -----------------------------
-st.subheader("🔍 탐지 결과 요약")
 st.dataframe(df_plot.head(20))
 
 # -----------------------------
-# 7. 성능 지표 (예시)
+# 8. 성능 지표 예시
 # -----------------------------
 st.subheader("📊 성능 지표 예시")
 st.write("""
-- **TP**: 올바르게 탐지한 공격  
-- **FP**: 잘못 탐지한 정상  
-- **TN**: 정상으로 정확히 판단  
-- **FN**: 탐지 못한 공격  
-- **Precision** = TP / (TP + FP)  
-- **Recall** = TP / (TP + FN)  
+- TP: 올바르게 탐지한 공격  
+- FP: 잘못 탐지한 정상  
+- TN: 정상으로 정확히 판단  
+- FN: 탐지 못한 공격  
+- Precision = TP / (TP + FP)  
+- Recall = TP / (TP + FN)  
 """)
 st.info("※ 실제 테스트 데이터가 있으면 TP, FP, TN, FN 값 계산 가능")
