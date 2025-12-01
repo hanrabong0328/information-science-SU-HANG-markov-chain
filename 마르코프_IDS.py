@@ -54,6 +54,7 @@ def load_data(file_path):
         'label','difficulty'
     ]
     df = pd.read_csv(file_path, names=column_names, index_col=False)
+    # 라벨 문자열 정리
     df['label'] = df['label'].astype(str).str.strip().str.replace(r'\.', '', regex=True)
     return df
 
