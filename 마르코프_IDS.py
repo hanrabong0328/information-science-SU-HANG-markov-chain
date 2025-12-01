@@ -26,12 +26,10 @@ seq_len = st.sidebar.slider("연속 이벤트 길이", min_value=2, max_value=20
 seq_count = st.sidebar.slider("연속 이벤트 묶음 수", min_value=10, max_value=500, value=50, step=10)
 threshold = st.sidebar.slider("이상 탐지 민감도", min_value=0.0001, max_value=0.1, value=0.01, step=0.001)
 
-# Expander: 사이드바 도움말
 with st.sidebar.expander("💡 탐지 도움말"):
     st.write("""
     - 빨간 점: 이상 이벤트 탐지  
     - 파란 점: 정상 이벤트  
-    - 연속 이벤트 길이, 묶음 수, 민감도를 조정해 탐지 시나리오를 바꿀 수 있습니다.
     - 평균 전이 확률이 임계값보다 낮으면 이상 이벤트로 표시됩니다.
     """)
 
@@ -50,11 +48,9 @@ def load_data(file_path):
         'srv_diff_host_rate','dst_host_count','dst_host_srv_count',
         'dst_host_same_srv_rate','dst_host_diff_srv_rate','dst_host_same_src_port_rate',
         'dst_host_srv_diff_host_rate','dst_host_serror_rate','dst_host_srv_serror_rate',
-        'dst_host_rerror_rate','dst_host_srv_rerror_rate',
-        'label','difficulty'
+        'dst_host_rerror_rate','dst_host_srv_rerror_rate','label','difficulty'
     ]
     df = pd.read_csv(file_path, names=column_names, index_col=False)
-    # 라벨 문자열 정리
     df['label'] = df['label'].astype(str).str.strip().str.replace(r'\.', '', regex=True)
     return df
 
@@ -85,7 +81,7 @@ st.dataframe(transition_model.round(3))
 st.caption("행: 현재 상태, 열: 다음 상태, 값: 발생 확률")
 
 # -----------------------------
-# 5. 탐지 시뮬레이션 (평균 방식으로 변경)
+# 5. 탐지 시뮬레이션 (시나리오 반영)
 # -----------------------------
 np.random.seed(42)
 states = list(transition_model.index)
@@ -93,9 +89,32 @@ sim_sequences = []
 avg_probs = []
 
 for _ in range(seq_count):
-    seq = np.random.choice(states, seq_len)
+    if scenario == "정상 트래픽":
+        seq = np.random.choice(states, seq_len)
+
+    elif scenario == "DoS 공격":
+        # 약한 상태로 몰리는 패턴(비정상 flag)
+        bad_state = states[-1]
+        seq = np.random.choice(states + [bad_state], seq_len,
+                               p=[0.7/len(states)]*len(states) + [0.3])
+
+    elif scenario == "Probe 공격":
+        # 탐색 시도 → 불규칙한 잦은 이동
+        seq = np.random.choice(states, seq_len,
+                               p=[1/len(states)]*len(states))
+        np.random.shuffle(seq)
+
+    elif scenario == "혼합 시나리오":
+        seq = np.random.choice(states, seq_len)
+        if np.random.rand() < 0.3:
+            seq = seq[::-1]  # 뒤집어 이상 패턴 생성
+
+    elif scenario == "랜덤 시나리오":
+        seq = np.random.choice(states, seq_len)
+
     sim_sequences.append(seq)
-    # 기존 곱 방식 대신 평균 전이 확률 계산
+
+    # 평균 전이 확률
     prob_list = [transition_model.loc[seq[i], seq[i+1]] for i in range(len(seq)-1)]
     avg_prob = np.mean(prob_list)
     avg_probs.append(avg_prob)
@@ -103,27 +122,18 @@ for _ in range(seq_count):
 anomaly_flags = [p < threshold for p in avg_probs]
 
 # -----------------------------
-# 6. Plotly 그래프: 선+점
+# 6. Plotly 그래프
 # -----------------------------
 fig = go.Figure()
-
-# 선 + 점 (전체 평균 전이 확률)
 fig.add_trace(go.Scatter(
-    x=list(range(1, seq_count+1)),
-    y=avg_probs,
-    mode="lines+markers",
-    name="평균 전이 확률"
+    x=list(range(1, seq_count+1)), y=avg_probs,
+    mode="lines+markers", name="평균 전이 확률"
 ))
-
-# 이상 이벤트만 빨간 점
 fig.add_trace(go.Scatter(
     x=[i+1 for i, flag in enumerate(anomaly_flags) if flag],
     y=[avg_probs[i] for i, flag in enumerate(anomaly_flags) if flag],
-    mode="markers",
-    marker=dict(color="red", size=10),
-    name="이상 이벤트"
+    mode="markers", marker=dict(color="red", size=10), name="이상 이벤트"
 ))
-
 fig.update_layout(title="연속 이벤트 평균 전이 확률", xaxis_title="연속 이벤트 묶음 번호",
                   yaxis_title="평균 전이 확률")
 st.plotly_chart(fig, use_container_width=True)
@@ -135,12 +145,12 @@ st.subheader("🔍 탐지 결과 요약")
 df_plot = pd.DataFrame({
     "연속 이벤트 묶음 번호": range(1, seq_count+1),
     "평균 전이 확률": avg_probs,
-    "이상 탐지 여부":["이상" if flag else "정상" for flag in anomaly_flags]
+    "이상 탐지 여부": ["이상" if flag else "정상" for flag in anomaly_flags]
 })
 st.dataframe(df_plot.head(20))
 
 # -----------------------------
-# 8. 성능 지표 예시
+# 8. 성능 지표 설명
 # -----------------------------
 st.subheader("📊 성능 지표 예시")
 st.write("""
@@ -148,7 +158,5 @@ st.write("""
 - FP: 잘못 탐지한 정상  
 - TN: 정상으로 정확히 판단  
 - FN: 탐지 못한 공격  
-- Precision = TP / (TP + FP)  
-- Recall = TP / (TP + FN)  
 """)
-st.info("※ 실제 테스트 데이터가 있으면 TP, FP, TN, FN 값 계산 가능")
+st.info("※ 실제 테스트 데이터가 있으면 지표 계산 가능")
