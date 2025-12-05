@@ -61,20 +61,39 @@ st.success("✅ 데이터 로드 완료")
 # 4. 마르코프 전이행렬 생성
 # -----------------------------
 def create_transition_matrix(df_normal):
+    # 1) 정상 데이터에서 등장하는 flag 상태들을 수집하고 정렬
     states = sorted(df_normal['flag'].unique())
-    state_to_idx = {state:i for i,state in enumerate(states)}
+    
+    # 2) 상태를 행렬 인덱스로 매핑하기 위한 딕셔너리 생성
+    state_to_idx = {state: i for i, state in enumerate(states)}
+    
+    # 3) (상태 수 x 상태 수) 크기의 전이 카운트 행렬 생성
     num_states = len(states)
-    counts = np.zeros((num_states,num_states))
+    counts = np.zeros((num_states, num_states))
+    
+    # 4) flag 값 시퀀스를 리스트로 추출
     flags = df_normal['flag'].tolist()
-    for i in range(len(flags)-1):
-        counts[state_to_idx[flags[i]], state_to_idx[flags[i+1]]] +=1
+    
+    # 5) 연속된 flag 전이 횟수를 카운트
+    for i in range(len(flags) - 1):
+        current_state = state_to_idx[flags[i]]
+        next_state = state_to_idx[flags[i + 1]]
+        counts[current_state, next_state] += 1
+    
+    # 6) 각 상태별 총 발생 수로 나누어 확률 계산 (정규화)
     row_sums = counts.sum(axis=1, keepdims=True)
     transition_matrix = np.divide(counts, row_sums, where=row_sums != 0)
+    
+    # 7) 0으로 나누는 경우 발생 시 확률값을 0.0001로 대체하여 안정성 확보
     transition_matrix = np.nan_to_num(transition_matrix, nan=0.0001)
+    
+    # 8) 결과를 DataFrame 형태로 반환
     return pd.DataFrame(transition_matrix, index=states, columns=states)
 
-df_normal = data_train[data_train['label']=="normal"]
+# 정상 데이터만 추출하여 모델 학습
+df_normal = data_train[data_train['label'] == "normal"]
 transition_model = create_transition_matrix(df_normal)
+
 
 st.subheader("📊 학습된 정상 트래픽 전이행렬 (일부)")
 st.dataframe(transition_model.round(3))
